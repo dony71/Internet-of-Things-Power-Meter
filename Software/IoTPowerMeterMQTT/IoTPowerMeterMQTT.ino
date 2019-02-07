@@ -83,7 +83,8 @@ void setup(void)
   setSyncInterval(TIME_SYNC_PERIOD);
 
   // Attach the interrupt that counts the used Watts
-  attachInterrupt(SENSOR_PIN, interrupt_blink, FALLING);
+  //attachInterrupt(SENSOR_PIN, interrupt_blink, FALLING);
+  attachInterrupt(SENSOR_PIN, interrupt_blink, RISING);
   
   // Show the new firmware upload progress on the display in percent
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total)
@@ -166,7 +167,7 @@ STATUS ICACHE_FLASH_ATTR state_wifi_connect()
     // Required to get mDNS working
     MDNS.begin(hostName);
 
-    helper_set_status("Connecting");
+    helper_set_status("Connecting Wifi");
     time_wifi_connect = millis();
     wifi_connect_status = BUSY;
   }
@@ -192,7 +193,34 @@ STATUS ICACHE_FLASH_ATTR state_time_sync()
   static byte packetBuffer[NTP_PACKET_SIZE] = {0};
   // Time when the request was started
   static uint32_t time_request = 0;
-
+  
+  // Determine daylight saving on 2nd Sunday in March
+  if (month() == daylightMonth)
+  {
+    if (weekday() == 1)
+    {
+      if ((day()-7 > 0) && (day()-7 <= 7))
+      {
+        timeZone = timeZone-1;
+      }
+    }
+  }
+  // Determine daylight saving on 1st Sunday in November
+  else if (month() == standardMonth)
+  {
+    if (weekday() == 1)
+    {
+      if (7-day() >= 0)
+      {
+        timeZone = timeZone+1;
+      }
+    }
+  }
+  else
+  {
+    timeZone = timeZone;
+  }
+  
   // Time can be set, unset or in need of synchronisation modes
   if(timeStatus() == timeSet)
   {
@@ -207,7 +235,7 @@ STATUS ICACHE_FLASH_ATTR state_time_sync()
 
       // Only bytes 40 to 43 are important, trash the rest
       // Concatenate 4 bytes and remove 70 years since Unix time starts on Jan 1 1970 and we want 1900
-      time_t currentTime = ((packetBuffer[40] << 24) | (packetBuffer[41] << 16) | (packetBuffer[42] << 8) | packetBuffer[43]) - 2208988800UL;
+      time_t currentTime = ((packetBuffer[40] << 24) | (packetBuffer[41] << 16) | (packetBuffer[42] << 8) | packetBuffer[43]) - 2208988800UL + timeZone * SECS_PER_HOUR;
       setTime(currentTime);
 
       // Stop and release the resources
@@ -233,7 +261,7 @@ STATUS ICACHE_FLASH_ATTR state_time_sync()
   }
   else
   {
-    helper_set_status("Time sync");
+    helper_set_status("Sync Time");
 
     // Synchronise local time with an Network Time Protocol (NTP) server
     IPAddress timeServerIP;
@@ -277,10 +305,11 @@ STATUS ICACHE_FLASH_ATTR state_mqtt()
     {
       // Subscribe to topics here
     }
+    helper_set_status("Connecting MQTT");
     return BUSY;
   }
   client.loop();
-  
+
   return OK;
 }
 
@@ -326,7 +355,7 @@ STATUS ICACHE_FLASH_ATTR state_log()
     }
 
     // Logging successful
-    helper_set_status("OK");
+    helper_set_status("Logging OK");
   }
 
   return OK;
@@ -401,7 +430,7 @@ STATUS ICACHE_FLASH_ATTR state_display_update()
   {
     currentSecond = second();
     memset(buffer, 0, sizeof(buffer));
-    sprintf(buffer, "%02d:%02d:%02dUTC", hour(), minute(), currentSecond);
+    sprintf(buffer, "%02d:%02d:%02d%s", hour(), minute(), currentSecond, timeZoneName);
     display.clear(SCREEN_ROW_TIME, SCREEN_START_COLUMN);
     display.sendStrXY(buffer, SCREEN_ROW_TIME, SCREEN_START_COLUMN);
   }
